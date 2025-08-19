@@ -4,7 +4,10 @@ import { Job } from 'bullmq';
 import { TasksService } from '../../modules/tasks/tasks.service';
 
 @Injectable()
-@Processor('task-processing')
+@Processor('task-processing', {
+  // Configure worker-level concurrency for higher throughput
+  concurrency: 5,
+})
 export class TaskProcessorService extends WorkerHost {
   private readonly logger = new Logger(TaskProcessorService.name);
 
@@ -31,9 +34,9 @@ export class TaskProcessorService extends WorkerHost {
           return { success: false, error: 'Unknown job type' };
       }
     } catch (error) {
-      // Basic error logging without proper handling or retries
+      // Log context; the job-level attempts/backoff are configured at enqueue
       this.logger.error(`Error processing job ${job.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      throw error; // Simply rethrows the error without any retry strategy
+      throw error;
     }
   }
 

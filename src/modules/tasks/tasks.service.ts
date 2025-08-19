@@ -23,11 +23,20 @@ export class TasksService {
     const task = this.tasksRepository.create(createTaskDto);
     const savedTask = await this.tasksRepository.save(task);
 
-    // Add to queue without waiting for confirmation or handling errors
-    this.taskQueue.add('task-status-update', {
-      taskId: savedTask.id,
-      status: savedTask.status,
-    });
+    // Add to queue with retry/backoff and cleanup semantics
+    await this.taskQueue.add(
+      'task-status-update',
+      {
+        taskId: savedTask.id,
+        status: savedTask.status,
+      },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
 
     return savedTask;
   }
@@ -125,12 +134,21 @@ export class TasksService {
 
     const updatedTask = await this.tasksRepository.save(task);
 
-    // Add to queue if status changed, but without proper error handling
+    // Add to queue if status changed, with retry/backoff and cleanup semantics
     if (originalStatus !== updatedTask.status) {
-      this.taskQueue.add('task-status-update', {
-        taskId: updatedTask.id,
-        status: updatedTask.status,
-      });
+      await this.taskQueue.add(
+        'task-status-update',
+        {
+          taskId: updatedTask.id,
+          status: updatedTask.status,
+        },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      );
     }
 
     return updatedTask;
