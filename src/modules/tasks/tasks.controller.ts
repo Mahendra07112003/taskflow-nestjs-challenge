@@ -22,9 +22,6 @@ import { TaskFilterDto } from './dto/task-filter.dto';
 export class TasksController {
   constructor(
     private readonly tasksService: TasksService,
-    // Anti-pattern: Controller directly accessing repository
-    @InjectRepository(Task)
-    private taskRepository: Repository<Task>
   ) {}
 
   @Post()
@@ -56,20 +53,8 @@ export class TasksController {
 
   @Get('stats')
   @ApiOperation({ summary: 'Get task statistics' })
-  async getStats() {
-    // Inefficient approach: N+1 query problem
-    const tasks = await this.taskRepository.find();
-    
-    // Inefficient computation: Should be done with SQL aggregation
-    const statistics = {
-      total: tasks.length,
-      completed: tasks.filter(t => t.status === TaskStatus.COMPLETED).length,
-      inProgress: tasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length,
-      pending: tasks.filter(t => t.status === TaskStatus.PENDING).length,
-      highPriority: tasks.filter(t => t.priority === TaskPriority.HIGH).length,
-    };
-    
-    return statistics;
+  async getStats(@Req() req: any) {
+    return this.tasksService.getStats(req.user.id);
   }
 
   @Get(':id')
@@ -101,38 +86,8 @@ export class TasksController {
 
   @Post('batch')
   @ApiOperation({ summary: 'Batch process multiple tasks' })
-  async batchProcess(@Body() operations: { tasks: string[], action: string }) {
-    // Inefficient batch processing: Sequential processing instead of bulk operations
+  async batchProcess(@Body() operations: { tasks: string[], action: 'complete' | 'delete' }, @Req() req: any) {
     const { tasks: taskIds, action } = operations;
-    const results = [];
-    
-    // N+1 query problem: Processing tasks one by one
-    for (const taskId of taskIds) {
-      try {
-        let result;
-        
-        switch (action) {
-          case 'complete':
-            result = await this.tasksService.update(taskId, { status: TaskStatus.COMPLETED }, (null as any));
-            break;
-          case 'delete':
-            result = await this.tasksService.remove(taskId, (null as any));
-            break;
-          default:
-            throw new HttpException(`Unknown action: ${action}`, HttpStatus.BAD_REQUEST);
-        }
-        
-        results.push({ taskId, success: true, result });
-      } catch (error) {
-        // Inconsistent error handling
-        results.push({ 
-          taskId, 
-          success: false, 
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
-      }
-    }
-    
-    return results;
+    return this.tasksService.batchProcess(req.user.id, taskIds, action);
   }
 }

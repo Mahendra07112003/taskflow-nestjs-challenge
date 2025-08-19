@@ -1,6 +1,6 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -97,18 +97,13 @@ export class TasksService {
   }
 
   async findOne(id: string, userId: string): Promise<Task> {
-    // Single query to fetch task, then enforce ownership
     const task = await this.tasksRepository.findOne({
-      where: { id },
+      where: { id, userId },
       relations: ['user'],
     });
 
     if (!task) {
       throw new NotFoundException(`Task with ID ${id} not found`);
-    }
-
-    if (task.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this task');
     }
 
     return task;
@@ -160,5 +155,53 @@ export class TasksService {
     }
     task.status = status as any;
     return this.tasksRepository.save(task);
+  }
+
+  async batchProcess(userId: string, taskIds: string[], action: 'complete' | 'delete') {
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      return { affected: 0 };
+    }
+
+    if (action === 'delete') {
+      const result = await this.tasksRepository.delete({ id: In(taskIds), userId });
+      return { affected: result.affected ?? 0 };
+    }
+
+    if (action === 'complete') {
+      const result = await this.tasksRepository.createQueryBuilder()
+        .update(Task)
+        .set({ status: TaskStatus.COMPLETED })
+        .where('user_id = :userId', { userId })
+        .andWhere('id IN (:...taskIds)', { taskIds })
+        .execute();
+      return { affected: result.affected ?? 0 };
+    }
+
+    return { affected: 0 };
+  }
+
+  async getStats(userId: string) {
+    const raw = await this.tasksRepository.createQueryBuilder('task')
+      .select('COUNT(*)', 'total')
+      .addSelect(`SUM(CASE WHEN task.status = :completed THEN 1 ELSE 0 END)`, 'completed')
+      .addSelect(`SUM(CASE WHEN task.status = :inProgress THEN 1 ELSE 0 END)`, 'inProgress')
+      .addSelect(`SUM(CASE WHEN task.status = :pending THEN 1 ELSE 0 END)`, 'pending')
+      .addSelect(`SUM(CASE WHEN task.priority = :high THEN 1 ELSE 0 END)`, 'highPriority')
+      .where('task.userId = :userId', { userId })
+      .setParameters({
+        completed: TaskStatus.COMPLETED,
+        inProgress: TaskStatus.IN_PROGRESS,
+        pending: TaskStatus.PENDING,
+        high: 'HIGH',
+      })
+      .getRawOne();
+
+    return {
+      total: Number(raw?.total ?? 0),
+      completed: Number(raw?.completed ?? 0),
+      inProgress: Number(raw?.inProgress ?? 0),
+      pending: Number(raw?.pending ?? 0),
+      highPriority: Number(raw?.highPriority ?? 0),
+    };
   }
 }
