@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import jwtConfig from './config/jwt.config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -16,6 +17,7 @@ import { CacheService } from './common/services/cache.service';
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [jwtConfig],
     }),
     
     // Database

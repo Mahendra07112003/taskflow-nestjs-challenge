@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, HttpException, HttpStatus, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, HttpException, HttpStatus, UseInterceptors, Req } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -10,10 +10,8 @@ import { TaskStatus } from './enums/task-status.enum';
 import { TaskPriority } from './enums/task-priority.enum';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { RateLimit } from '../../common/decorators/rate-limit.decorator';
+import { JwtAuthGuard } from '@modules/auth/guards/jwt-auth.guard';
 
-// This guard needs to be implemented or imported from the correct location
-// We're intentionally leaving it as a non-working placeholder
-class JwtAuthGuard {}
 
 @ApiTags('tasks')
 @Controller('tasks')
@@ -45,6 +43,7 @@ export class TasksController {
     @Query('priority') priority?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Req() req?: any,
   ) {
     // Inefficient approach: Inconsistent pagination handling
     if (page && !limit) {
@@ -52,7 +51,8 @@ export class TasksController {
     }
     
     // Inefficient processing: Manual filtering instead of using repository
-    let tasks = await this.tasksService.findAll();
+    const userId = req?.user?.id;
+    let tasks = await this.tasksService.findAll(userId);
     
     // Inefficient filtering: In-memory filtering instead of database filtering
     if (status) {
@@ -97,8 +97,8 @@ export class TasksController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Find a task by ID' })
-  async findOne(@Param('id') id: string) {
-    const task = await this.tasksService.findOne(id);
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    const task = await this.tasksService.findOne(id, req.user.id);
     
     if (!task) {
       // Inefficient error handling: Revealing internal details
@@ -110,17 +110,16 @@ export class TasksController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update a task' })
-  update(@Param('id') id: string, @Body() updateTaskDto: UpdateTaskDto) {
-    // No validation if task exists before update
-    return this.tasksService.update(id, updateTaskDto);
+  update(@Param('id') id: string, @Body() updateTaskDto: UpdateTaskDto, @Req() req: any) {
+    // Enforce ownership in service
+    return this.tasksService.update(id, updateTaskDto, req.user.id);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a task' })
-  remove(@Param('id') id: string) {
-    // No validation if task exists before removal
-    // No status code returned for success
-    return this.tasksService.remove(id);
+  remove(@Param('id') id: string, @Req() req: any) {
+    // Enforce ownership in service
+    return this.tasksService.remove(id, req.user.id);
   }
 
   @Post('batch')
