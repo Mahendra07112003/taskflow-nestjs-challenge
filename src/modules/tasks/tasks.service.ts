@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -32,12 +32,68 @@ export class TasksService {
     return savedTask;
   }
 
-  async findAll(userId: string): Promise<Task[]> {
-    // Filter by the authenticated user's ownership
-    return this.tasksRepository.find({
-      where: { userId },
-      relations: ['user'],
-    });
+  async findAll(userId: string, filters?: {
+    status?: TaskStatus;
+    priority?: any;
+    search?: string;
+    dueDateFrom?: string;
+    dueDateTo?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: 'createdAt' | 'dueDate' | 'priority' | 'status';
+    sortOrder?: 'ASC' | 'DESC';
+  }): Promise<{ data: Task[]; total: number; page: number; limit: number; totalPages: number }>{
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 10;
+    const sortBy = filters?.sortBy ?? 'createdAt';
+    const sortOrder = filters?.sortOrder ?? 'DESC';
+
+    const qb = this.tasksRepository.createQueryBuilder('task')
+      .where('task.userId = :userId', { userId });
+
+    if (filters?.status) {
+      qb.andWhere('task.status = :status', { status: filters.status });
+    }
+
+    if (filters?.priority) {
+      qb.andWhere('task.priority = :priority', { priority: filters.priority });
+    }
+
+    if (filters?.dueDateFrom) {
+      qb.andWhere('task.dueDate >= :dueDateFrom', { dueDateFrom: filters.dueDateFrom });
+    }
+
+    if (filters?.dueDateTo) {
+      qb.andWhere('task.dueDate <= :dueDateTo', { dueDateTo: filters.dueDateTo });
+    }
+
+    if (filters?.search) {
+      qb.andWhere(new Brackets((sub) => {
+        sub.where('LOWER(task.title) LIKE :q', { q: `%${filters.search.toLowerCase()}%` })
+           .orWhere('LOWER(task.description) LIKE :q', { q: `%${filters.search.toLowerCase()}%` });
+      }));
+    }
+
+    const sortMap: Record<string, string> = {
+      createdAt: 'task.createdAt',
+      dueDate: 'task.dueDate',
+      priority: 'task.priority',
+      status: 'task.status',
+    };
+
+    qb.orderBy(sortMap[sortBy], sortOrder)
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+
+    return {
+      data: rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
   }
 
   async findOne(id: string, userId: string): Promise<Task> {

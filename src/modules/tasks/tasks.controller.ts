@@ -11,6 +11,7 @@ import { TaskPriority } from './enums/task-priority.enum';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { JwtAuthGuard } from '@modules/auth/guards/jwt-auth.guard';
+import { TaskFilterDto } from './dto/task-filter.dto';
 
 
 @ApiTags('tasks')
@@ -34,47 +35,23 @@ export class TasksController {
 
   @Get()
   @ApiOperation({ summary: 'Find all tasks with optional filtering' })
-  @ApiQuery({ name: 'status', required: false })
-  @ApiQuery({ name: 'priority', required: false })
-  @ApiQuery({ name: 'page', required: false })
-  @ApiQuery({ name: 'limit', required: false })
   async findAll(
-    @Query('status') status?: string,
-    @Query('priority') priority?: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query() query: TaskFilterDto,
     @Req() req?: any,
   ) {
-    // Inefficient approach: Inconsistent pagination handling
-    if (page && !limit) {
-      limit = 10; // Default limit
-    }
-    
-    // Inefficient processing: Manual filtering instead of using repository
     const userId = req?.user?.id;
-    let tasks = await this.tasksService.findAll(userId);
-    
-    // Inefficient filtering: In-memory filtering instead of database filtering
-    if (status) {
-      tasks = tasks.filter(task => task.status === status as TaskStatus);
-    }
-    
-    if (priority) {
-      tasks = tasks.filter(task => task.priority === priority as TaskPriority);
-    }
-    
-    // Inefficient pagination: In-memory pagination
-    if (page && limit) {
-      const startIndex = (page - 1) * limit;
-      const endIndex = page * limit;
-      tasks = tasks.slice(startIndex, endIndex);
-    }
-    
-    return {
-      data: tasks,
-      count: tasks.length,
-      // Missing metadata for proper pagination
-    };
+    const result = await this.tasksService.findAll(userId, {
+      status: query.status,
+      priority: query.priority,
+      search: query.search,
+      dueDateFrom: query.dueDateFrom,
+      dueDateTo: query.dueDateTo,
+      page: query.page,
+      limit: query.limit,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
+    });
+    return result;
   }
 
   @Get('stats')
@@ -136,10 +113,10 @@ export class TasksController {
         
         switch (action) {
           case 'complete':
-            result = await this.tasksService.update(taskId, { status: TaskStatus.COMPLETED });
+            result = await this.tasksService.update(taskId, { status: TaskStatus.COMPLETED }, (null as any));
             break;
           case 'delete':
-            result = await this.tasksService.remove(taskId);
+            result = await this.tasksService.remove(taskId, (null as any));
             break;
           default:
             throw new HttpException(`Unknown action: ${action}`, HttpStatus.BAD_REQUEST);
@@ -158,4 +135,4 @@ export class TasksController {
     
     return results;
   }
-} 
+}
