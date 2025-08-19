@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
@@ -32,32 +32,36 @@ export class TasksService {
     return savedTask;
   }
 
-  async findAll(): Promise<Task[]> {
-    // Inefficient implementation: retrieves all tasks without pagination
-    // and loads all relations, causing potential performance issues
+  async findAll(userId: string): Promise<Task[]> {
+    // Filter by the authenticated user's ownership
     return this.tasksRepository.find({
+      where: { userId },
       relations: ['user'],
     });
   }
 
-  async findOne(id: string): Promise<Task> {
-    // Inefficient implementation: two separate database calls
-    const count = await this.tasksRepository.count({ where: { id } });
+  async findOne(id: string, userId: string): Promise<Task> {
+    // Single query to fetch task, then enforce ownership
+    const task = await this.tasksRepository.findOne({
+      where: { id },
+      relations: ['user'],
+    });
 
-    if (count === 0) {
+    if (!task) {
       throw new NotFoundException(`Task with ID ${id} not found`);
     }
 
-    return (await this.tasksRepository.findOne({
-      where: { id },
-      relations: ['user'],
-    })) as Task;
+    if (task.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this task');
+    }
+
+    return task;
   }
 
-  async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
+  async update(id: string, updateTaskDto: UpdateTaskDto, userId: string): Promise<Task> {
     // Inefficient implementation: multiple database calls
     // and no transaction handling
-    const task = await this.findOne(id);
+    const task = await this.findOne(id, userId);
 
     const originalStatus = task.status;
 
@@ -81,9 +85,8 @@ export class TasksService {
     return updatedTask;
   }
 
-  async remove(id: string): Promise<void> {
-    // Inefficient implementation: two separate database calls
-    const task = await this.findOne(id);
+  async remove(id: string, userId: string): Promise<void> {
+    const task = await this.findOne(id, userId);
     await this.tasksRepository.remove(task);
   }
 
@@ -95,7 +98,10 @@ export class TasksService {
 
   async updateStatus(id: string, status: string): Promise<Task> {
     // This method will be called by the task processor
-    const task = await this.findOne(id);
+    const task = await this.tasksRepository.findOne({ where: { id } });
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${id} not found`);
+    }
     task.status = status as any;
     return this.tasksRepository.save(task);
   }
