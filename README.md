@@ -252,3 +252,103 @@ The API should expose the following endpoints:
 - `POST /tasks/batch` - Batch operations on tasks
 
 Good luck! This challenge is designed to test the skills of experienced engineers in creating scalable, maintainable, and secure systems.
+ 
+---
+
+## Problems Found
+
+- In-memory filtering/pagination and stats in `tasks.controller.ts` causing heavy memory usage and N+1 patterns
+- Controllers coupled to repositories (violates separation of concerns)
+- Weak rate limiting with in-memory store; JWT guard placeholder on tasks
+- No ownership checks on tasks; users could access others’ tasks
+- Queue jobs enqueued without retry/backoff; worker lacked concurrency settings
+- Migrations duplicated and missing indexes on hot columns (`user_id`, `status`, `priority`, `due_date`)
+
+## What I Fixed
+
+- Security & ownership
+  - Replaced placeholder guard with real `JwtAuthGuard` and required `JWT_SECRET`
+  - Enforced per-user scoping in service methods
+  - Example:
+    ```ts
+    // src/modules/tasks/tasks.service.ts
+    async findOne(id: string, userId: string) {
+      const task = await this.tasksRepository.findOne({ where: { id, userId }, relations: ['user'] });
+      if (!task) throw new NotFoundException('Task not found');
+      return task;
+    }
+    ```
+
+- Performance & pagination
+  - Implemented `TaskFilterDto` and DB-side filtering/pagination with query builder
+  - Example:
+    ```ts
+    const qb = this.tasksRepository.createQueryBuilder('task')
+      .where('task.userId = :userId', { userId })
+      .andWhere('task.status = :status', { status })
+      .skip((page - 1) * limit)
+      .take(limit);
+    const [data, total] = await qb.getManyAndCount();
+    ```
+
+- Bulk operations
+  - Replaced per-item loops with set-based queries
+  - Example:
+    ```ts
+    await this.tasksRepository.delete({ id: In(taskIds), userId });
+    ```
+
+- Stats via SQL aggregation
+  - Moved from in-memory counts to a single grouped query
+
+- Queues resilience
+  - Enqueue with attempts/backoff and cleanup:
+    ```ts
+    await this.taskQueue.add('task-status-update', data, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: true,
+      removeOnFail: false,
+    });
+    ```
+  - Worker concurrency set to 5
+
+- Indexes
+  - Added migration to index `user_id`, `status`, `priority`, `due_date`
+
+## Trade-offs
+
+- Did not implement CQRS/Event Sourcing to keep scope focused on urgent fixes
+- Kept stats endpoint simple; avoided heavy analytics or materialized views
+- Left rate limiting swap to Nest Throttler/Redis as a follow-up for production
+
+## Setup Instructions (for this fork)
+
+1) Install dependencies
+```bash
+bun install
+```
+
+2) Configure environment
+```bash
+cp .env.example .env
+# Set JWT_SECRET, DB_*, REDIS_* values
+```
+
+3) Build and migrate
+```bash
+bun run build
+bun run migration:run
+# or
+bun run migration:custom
+```
+
+4) Seed sample data (optional)
+```bash
+bun run seed
+```
+
+5) Start server
+```bash
+bun run start:dev
+```
